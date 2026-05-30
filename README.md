@@ -57,22 +57,23 @@ The bot is automatically deployed to Railway. Set the `DISCORD_TOKEN` environmen
 
 ## Commands
 
+Use these slash commands in Discord:
+
 | Command | Description |
 |---------|-------------|
-| `!play <query>` | Play a song (YouTube search) |
-| `!skip` | Skip to the next track |
-| `!stop` | Stop music and clear queue |
-| `!queue` | Show current queue |
-| `!help` | Show all commands |
-| `!ping` | Check bot latency |
+| `/play <query>` | Play a song from YouTube or other sources |
+| `/skip` | Skip to the next track |
+| `/stop` | Stop music and clear queue |
+| `/queue` | Show the current queue |
+| `/ping` | Check bot latency |
 
 ## Usage Examples
 
 ```
-!play Never Gonna Give You Up
-!skip
-!queue
-!stop
+/play Never Gonna Give You Up
+/skip
+/queue
+/stop
 ```
 
 ## Creating a Discord Bot
