@@ -2,6 +2,11 @@ const { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes, EmbedBuild
 const { useMainPlayer } = require('discord-player');
 require('dotenv').config();
 
+if (!process.env.DISCORD_TOKEN) {
+  console.error('DISCORD_TOKEN is not set. Set the variable in your environment or Railway project.');
+  process.exit(1);
+}
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -10,6 +15,14 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildVoiceStates
   ]
+});
+
+client.on('error', (error) => {
+  console.error('Client error:', error);
+});
+
+process.on('unhandledRejection', (error) => {
+  console.error('Unhandled promise rejection:', error);
 });
 
 const player = useMainPlayer();
