@@ -1,5 +1,5 @@
 const { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes, EmbedBuilder } = require('discord.js');
-const { useMainPlayer } = require('discord-player');
+const { Player } = require('discord-player');
 require('dotenv').config();
 
 if (!process.env.DISCORD_TOKEN) {
@@ -17,6 +17,9 @@ const client = new Client({
   ]
 });
 
+// Initialize the player with the client
+const player = new Player(client);
+
 client.on('error', (error) => {
   console.error('Client error:', error);
 });
@@ -25,7 +28,6 @@ process.on('unhandledRejection', (error) => {
   console.error('Unhandled promise rejection:', error);
 });
 
-const player = useMainPlayer();
 const commands = [];
 
 // Register slash commands
