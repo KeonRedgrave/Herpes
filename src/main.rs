@@ -1,6 +1,8 @@
 use poise::serenity_prelude as serenity;
-use songbird::SerenityInit; // Restored to fix the register_songbird error
-use lavalink_rs::prelude::*; // Imports the modern Lavalink tools
+use songbird::SerenityInit;
+use lavalink_rs::prelude::*;
+use lavalink_rs::model::events::Events;
+use lavalink_rs::model::track::TrackData;
 use std::env;
 
 struct Data {
@@ -22,13 +24,11 @@ async fn play(ctx: Context<'_>, #[description = "Song name or URL"] query: Strin
     };
 
     if let Some(channel) = channel_id {
-        // 1. Tell Discord we are joining the channel
         println!("[STEP 2] Attempting to join voice channel...");
         let manager = songbird::get(ctx.serenity_context()).await.unwrap().clone();
         manager.join(guild_id, channel).await.unwrap();
         println!("[STEP 3] Connected to Discord voice channel.");
 
-        // 2. Tell Lavalink to search for the track
         println!("[STEP 4] Formatting query for Lavalink...");
         let search_query = if query.starts_with("http") {
             query.clone()
@@ -39,12 +39,10 @@ async fn play(ctx: Context<'_>, #[description = "Song name or URL"] query: Strin
         println!("[STEP 5] Sending search request to Lavalink node...");
         let lava = &ctx.data().lavalink;
         
-        // Use guild_id.get() to safely pass the u64 to Lavalink
         let response = lava.load_tracks(guild_id.get(), &search_query).await.unwrap();
 
         println!("[STEP 6] Processing Lavalink response...");
         
-        // Destructure the Lavalink TrackData enum to extract the actual track securely
         let track = match response.data {
             Some(TrackData::Track(t)) => Some(t),
             Some(TrackData::Search(mut s)) => s.pop(),
@@ -52,7 +50,6 @@ async fn play(ctx: Context<'_>, #[description = "Song name or URL"] query: Strin
             _ => None,
         };
 
-        // 3. Tell Lavalink to stream the extracted result
         if let Some(t) = track {
             println!("[STEP 7] Track found! Commanding Lavalink to play audio...");
             let player = lava.get_player_context(guild_id.get()).unwrap();
@@ -77,11 +74,9 @@ async fn leave(ctx: Context<'_>) -> Result<(), Error> {
     println!("[INFO] Command '/leave' received.");
     let guild_id = ctx.guild_id().unwrap();
     
-    // Disconnect Lavalink using guild_id.get() and the modern delete_player method
     let lava = &ctx.data().lavalink;
     let _ = lava.delete_player(guild_id.get()).await;
 
-    // Disconnect Discord
     let manager = songbird::get(ctx.serenity_context()).await.unwrap().clone();
     let _ = manager.remove(guild_id).await;
     
@@ -117,20 +112,21 @@ async fn main() {
                 
                 println!("[BOOT] Connecting to Lavalink node...");
                 
-                // Modern v0.11 NodeBuilder initialization
-                let node = NodeBuilder {
+                // Construct the node using the correct struct and wrapper for UserId
+                let node = lavalink_rs::node::Node {
                     hostname: lava_host,
                     port: lava_port,
                     is_ssl: lava_secure,
                     password: lava_password,
-                    user_id: ready.user.id.get(),
+                    user_id: lavalink_rs::model::UserId(ready.user.id.get()),
                     session_id: None,
                 };
 
-                // Build the client securely with standard instantiation
+                // Build the client, supplying the required distribution strategy
                 let lavalink_client = LavalinkClient::new(
                     Events::default(),
-                    vec![node]
+                    vec![node],
+                    NodeDistributionStrategy::ShorterTaskCount
                 ).await;
 
                 println!("✅ Bot connected to Discord & Lavalink Node!");
