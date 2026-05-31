@@ -8,9 +8,13 @@ type Context<'a> = poise::Context<'a, Data, Error>;
 
 #[poise::command(slash_command, prefix_command)]
 async fn join(ctx: Context<'_>) -> Result<(), Error> {
-    let guild = ctx.guild().unwrap();
-    let channel_id = guild.voice_states.get(&ctx.author().id)
-        .and_then(|voice_state| voice_state.channel_id);
+    // FIX: Scope the cache lookup so the lock drops before we use .await
+    let (guild_id, channel_id) = {
+        let guild = ctx.guild().unwrap();
+        let channel_id = guild.voice_states.get(&ctx.author().id)
+            .and_then(|voice_state| voice_state.channel_id);
+        (guild.id, channel_id)
+    };
 
     let connect_to = match channel_id {
         Some(channel) => channel,
@@ -23,7 +27,7 @@ async fn join(ctx: Context<'_>) -> Result<(), Error> {
     let manager = songbird::get(ctx.serenity_context()).await
         .expect("Songbird Client placed in at initialisation.").clone();
 
-    let _handler = manager.join(guild.id, connect_to).await;
+    let _handler = manager.join(guild_id, connect_to).await;
     ctx.say("Joined your channel!").await?;
     Ok(())
 }
@@ -38,7 +42,6 @@ async fn play(ctx: Context<'_>, #[description = "URL of the song"] url: String) 
     if let Some(handler_lock) = manager.get(guild_id) {
         let mut handler = handler_lock.lock().await;
 
-        // The modern Songbird 0.4 setup for YouTube streaming
         let http_client = reqwest::Client::new();
         let src = songbird::input::YoutubeDl::new(http_client, url.clone());
         handler.play_input(src.into());
@@ -72,7 +75,6 @@ async fn main() {
     
     let intents = serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT;
 
-    // The modern Poise 0.6 framework setup
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
             commands: vec![join(), play(), leave()],
@@ -91,7 +93,6 @@ async fn main() {
         })
         .build();
 
-    // Attach everything together, including Songbird, via the ClientBuilder
     let mut client = serenity::ClientBuilder::new(token, intents)
         .framework(framework)
         .register_songbird()
