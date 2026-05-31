@@ -3,7 +3,6 @@ use songbird::SerenityInit;
 use std::env;
 
 struct Data {}
-// ⚠️ IMPORTANT: Make sure this exact line is copied fully with the <...> brackets!
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
 
@@ -39,15 +38,12 @@ async fn play(ctx: Context<'_>, #[description = "URL of the song"] url: String) 
     if let Some(handler_lock) = manager.get(guild_id) {
         let mut handler = handler_lock.lock().await;
 
-        match songbird::input::ytdl(&url).await {
-            Ok(source) => {
-                handler.play_source(source);
-                ctx.say(format!("Now playing: {}", url)).await?;
-            }
-            Err(e) => {
-                ctx.say(format!("Failed to stream audio: {:?}", e)).await?;
-            }
-        }
+        // The modern Songbird 0.4 setup for YouTube streaming
+        let http_client = reqwest::Client::new();
+        let src = songbird::input::YoutubeDl::new(http_client, url.clone());
+        handler.play_input(src.into());
+        
+        ctx.say(format!("Now playing: {}", url)).await?;
     } else {
         ctx.say("I am not in a voice channel. Run `/join` or `!join` first!").await?;
     }
@@ -74,35 +70,35 @@ async fn leave(ctx: Context<'_>) -> Result<(), Error> {
 async fn main() {
     let token = env::var("DISCORD_TOKEN").expect("Expected a DISCORD_TOKEN");
     
-    // Explicitly request the Message Content intent so `!play` works
     let intents = serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT;
 
-    // Define framework options (commands and prefixes)
-    let options = poise::FrameworkOptions {
-        commands: vec![join(), play(), leave()],
-        prefix_options: poise::PrefixFrameworkOptions {
-            prefix: Some("!".into()),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-
-    // Correct initialization format for Poise 0.5
+    // The modern Poise 0.6 framework setup
     let framework = poise::Framework::builder()
-        .options(options)
-        .token(token)
-        .intents(intents)
-        .client_settings(|builder| builder.register_songbird()) // Injects the audio engine
+        .options(poise::FrameworkOptions {
+            commands: vec![join(), play(), leave()],
+            prefix_options: poise::PrefixFrameworkOptions {
+                prefix: Some("!".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
         .setup(|ctx, _ready, framework| {
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 println!("Music bot is running!");
                 Ok(Data {})
             })
-        });
+        })
+        .build();
 
-    // Start the bot
-    if let Err(why) = framework.run().await {
+    // Attach everything together, including Songbird, via the ClientBuilder
+    let mut client = serenity::ClientBuilder::new(token, intents)
+        .framework(framework)
+        .register_songbird()
+        .await
+        .expect("Error creating client");
+
+    if let Err(why) = client.start().await {
         println!("Client error: {:?}", why);
     }
 }

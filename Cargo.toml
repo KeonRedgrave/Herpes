@@ -4,5 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-poise = "0.6"
+poise = "0.6.2"
 tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
+songbird = "0.4.3"
+reqwest = "0.12"
+symphonia = { version = "0.5.3", features = ["all"] }
