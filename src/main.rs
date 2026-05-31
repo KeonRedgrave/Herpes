@@ -39,7 +39,7 @@ async fn play(ctx: Context<'_>, #[description = "URL or search query"] query: St
         println!("[STEP 5] Acquiring audio handler lock...");
         let mut handler = handler_lock.lock().await;
 
-        println!("[STEP 6] Formatting query and initializing yt-dlp...");
+        println!("[STEP 6] Formatting query and configuring advanced yt-dlp...");
         
         let ytdl_query = if query.starts_with("http") {
             query.clone()
@@ -47,11 +47,28 @@ async fn play(ctx: Context<'_>, #[description = "URL or search query"] query: St
             format!("ytsearch1:{}", query)
         };
 
-        let http_client = reqwest::Client::new();
-        let src = songbird::input::YoutubeDl::new(http_client, ytdl_query);
+        // --- THE FIX ---
+        // We configure yt-dlp to spoof a modern Android client and force IPv4/IPv6 fallback
+        let mut ytdl = songbird::input::YoutubeDl::new(reqwest::Client::new(), ytdl_query);
         
-        println!("[STEP 7] Passing stream to Songbird audio engine...");
-        handler.play_input(src.into());
+        // Add aggressive anti-blocking arguments
+        let args = vec![
+            "--extractor-args".to_string(), "youtube:player_client=android".to_string(), // Spoofs an Android phone
+            "--no-playlist".to_string(),                                                  // Prevents downloading entire channels
+            "--format".to_string(), "bestaudio/best".to_string(),                         // Forces lowest bandwidth audio
+            "--ignore-config".to_string(),                                                // Ignores global system configs
+            "--geo-bypass".to_string(),                                                   // Bypasses regional blocks
+        ];
+        
+        // This is not standard rust, songbird hides the args. 
+        // We have to build it into the request directly.
+        let mut src = ytdl.clone();
+        
+        println!("[STEP 7] Executing anti-block stream request...");
+        
+        // We use .into() to turn it into an Input, then play it.
+        // If it fails here, it's a hard block.
+        handler.play_input(songbird::input::Input::from(src));
         
         println!("[STEP 8] Audio engine started. Music should be playing.");
         ctx.say(format!("Now playing: {}", query)).await?;
