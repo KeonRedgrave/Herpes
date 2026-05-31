@@ -1,8 +1,6 @@
 use poise::serenity_prelude as serenity;
 use songbird::SerenityInit;
 use lavalink_rs::prelude::*;
-use lavalink_rs::model::events::Events;
-use lavalink_rs::model::track::TrackData;
 use std::env;
 
 struct Data {
@@ -43,17 +41,18 @@ async fn play(ctx: Context<'_>, #[description = "Song name or URL"] query: Strin
 
         println!("[STEP 6] Processing Lavalink response...");
         
+        // 0.11.0 Paradigm: TrackLoadData handles extraction safely
         let track = match response.data {
-            Some(TrackData::Track(t)) => Some(t),
-            Some(TrackData::Search(mut s)) => s.pop(),
-            Some(TrackData::Playlist(mut p)) => p.tracks.pop(),
+            Some(TrackLoadData::Track(t)) => Some(t),
+            Some(TrackLoadData::Search(mut s)) => s.pop(),
+            Some(TrackLoadData::Playlist(mut p)) => p.tracks.pop(),
             _ => None,
         };
 
         if let Some(t) = track {
             println!("[STEP 7] Track found! Commanding Lavalink to play audio...");
             let player = lava.get_player_context(guild_id.get()).unwrap();
-            player.play(t).await.unwrap();
+            player.play(&t).await.unwrap(); // v0.11 requires a reference &t
             println!("[STEP 8] Lavalink is now streaming the audio.");
             ctx.say(format!("🎶 Now playing via Lavalink: **{}**", query)).await?;
         } else {
@@ -112,21 +111,20 @@ async fn main() {
                 
                 println!("[BOOT] Connecting to Lavalink node...");
                 
-                // Construct the node using the correct struct and wrapper for UserId
-                let node = lavalink_rs::node::Node {
-                    hostname: lava_host,
-                    port: lava_port,
-                    is_ssl: lava_secure,
-                    password: lava_password,
-                    user_id: lavalink_rs::model::UserId(ready.user.id.get()),
-                    session_id: None,
-                };
+                // 0.11.0 Paradigm: We MUST use NodeBuilder with specific methods
+                let node = NodeBuilder::new(&lava_host)
+                    .port(lava_port)
+                    .is_ssl(lava_secure)
+                    .password(&lava_password)
+                    .user_id(ready.user.id.get())
+                    .build()
+                    .expect("Failed to build Lavalink Node");
 
-                // Build the client, supplying the required distribution strategy
+                // 0.11.0 Paradigm: LavalinkClient uses builder pattern correctly now
                 let lavalink_client = LavalinkClient::new(
-                    Events::default(),
+                    lavalink_rs::model::events::Events::default(),
                     vec![node],
-                    NodeDistributionStrategy::ShorterTaskCount
+                    NodeDistributionStrategy::shorthand()
                 ).await;
 
                 println!("✅ Bot connected to Discord & Lavalink Node!");
