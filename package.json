@@ -1,0 +1,29 @@
+{
+  "name": "discord-music",
+  "version": "2.2.0",
+  "description": "Discord Music Bot with Lavalink",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "discord",
+    "music",
+    "bot",
+    "lavalink"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.26.4",
+    "dotenv": "^17.2.3",
+    "kazagumo": "^3.4.3",
+    "shoukaku": "^4.3.0"
+  }
+}
