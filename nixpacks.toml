@@ -1,8 +1,0 @@
-[phases.setup]
-aptPkgs = ["ffmpeg", "python3", "python3-pip", "cmake", "libopus-dev"]
-
-[phases.build]
-cmds = [
-    "pip3 install yt-dlp --break-system-packages",
-    "cargo build --release"
-]

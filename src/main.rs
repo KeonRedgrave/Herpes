@@ -1,15 +1,17 @@
 use poise::serenity_prelude as serenity;
-use songbird::SerenityInit;
+use lavalink_rs::{LavalinkClient, LavalinkClientBuilder, NodeBuilder};
 use std::env;
 
-struct Data {}
+// We store the Lavalink connection in our bot's shared data
+struct Data {
+    lavalink: LavalinkClient,
+}
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type Context<'a> = poise::Context<'a, Data, Error>;
 
 #[poise::command(slash_command, prefix_command)]
-async fn play(ctx: Context<'_>, #[description = "URL or search query"] query: String) -> Result<(), Error> {
+async fn play(ctx: Context<'_>, #[description = "Song name or URL"] query: String) -> Result<(), Error> {
     ctx.defer().await?;
-    println!("[STEP 1] Command '/play' received for query: {}", query);
     
     let (guild_id, channel_id) = {
         let guild = ctx.guild().unwrap();
@@ -18,63 +20,32 @@ async fn play(ctx: Context<'_>, #[description = "URL or search query"] query: St
         (guild.id, channel_id)
     };
 
-    let manager = songbird::get(ctx.serenity_context()).await.unwrap().clone();
-    
-    if manager.get(guild_id).is_none() {
-        println!("[STEP 2] Bot is not in a VC. Attempting auto-join...");
-        if let Some(channel) = channel_id {
-            println!("[STEP 3] Found user in channel {}. Joining...", channel);
-            let _handler = manager.join(guild_id, channel).await;
-            println!("[STEP 4] Successfully joined the channel.");
-        } else {
-            println!("[ERROR] User is not in a voice channel.");
-            ctx.say("You need to join a voice channel first!").await?;
-            return Ok(());
-        }
-    } else {
-        println!("[STEP 2] Bot is already in a voice channel.");
-    }
+    if let Some(channel) = channel_id {
+        // 1. Tell Discord we are joining the channel
+        let manager = songbird::get(ctx.serenity_context()).await.unwrap().clone();
+        manager.join(guild_id, channel).await.unwrap();
 
-    if let Some(handler_lock) = manager.get(guild_id) {
-        println!("[STEP 5] Acquiring audio handler lock...");
-        let mut handler = handler_lock.lock().await;
-
-        println!("[STEP 6] Formatting query and configuring advanced yt-dlp...");
-        
-        let ytdl_query = if query.starts_with("http") {
+        // 2. Tell Lavalink to search for the track
+        let search_query = if query.starts_with("http") {
             query.clone()
         } else {
-            format!("ytsearch1:{}", query)
+            format!("ytsearch:{}", query)
         };
+        
+        let lava = &ctx.data().lavalink;
+        let tracks = lava.load_tracks(guild_id, &search_query).await.unwrap();
 
-        // --- THE FIX ---
-        // We configure yt-dlp to spoof a modern Android client and force IPv4/IPv6 fallback
-        let mut ytdl = songbird::input::YoutubeDl::new(reqwest::Client::new(), ytdl_query);
-        
-        // Add aggressive anti-blocking arguments
-        let args = vec![
-            "--extractor-args".to_string(), "youtube:player_client=android".to_string(), // Spoofs an Android phone
-            "--no-playlist".to_string(),                                                  // Prevents downloading entire channels
-            "--format".to_string(), "bestaudio/best".to_string(),                         // Forces lowest bandwidth audio
-            "--ignore-config".to_string(),                                                // Ignores global system configs
-            "--geo-bypass".to_string(),                                                   // Bypasses regional blocks
-        ];
-        
-        // This is not standard rust, songbird hides the args. 
-        // We have to build it into the request directly.
-        let mut src = ytdl.clone();
-        
-        println!("[STEP 7] Executing anti-block stream request...");
-        
-        // We use .into() to turn it into an Input, then play it.
-        // If it fails here, it's a hard block.
-        handler.play_input(songbird::input::Input::from(src));
-        
-        println!("[STEP 8] Audio engine started. Music should be playing.");
-        ctx.say(format!("Now playing: {}", query)).await?;
+        // 3. Tell Lavalink to stream the first result to the channel
+        if let Some(track) = tracks.tracks.first() {
+            let player = lava.get_player_context(guild_id).unwrap();
+            player.play(track).await.unwrap();
+            ctx.say(format!("🎶 Now playing via Lavalink: **{}**", query)).await?;
+        } else {
+            ctx.say("❌ Could not find that track on YouTube.").await?;
+        }
+
     } else {
-        println!("[ERROR] Failed to retrieve the audio handler.");
-        ctx.say("An error occurred while trying to play the audio.").await?;
+        ctx.say("❌ You need to join a voice channel first!").await?;
     }
 
     Ok(())
@@ -82,27 +53,28 @@ async fn play(ctx: Context<'_>, #[description = "URL or search query"] query: St
 
 #[poise::command(slash_command, prefix_command)]
 async fn leave(ctx: Context<'_>) -> Result<(), Error> {
-    println!("[INFO] Command '/leave' received.");
     let guild_id = ctx.guild_id().unwrap();
+    
+    // Disconnect Lavalink
+    let lava = &ctx.data().lavalink;
+    lava.destroy_player(guild_id).await.unwrap();
+
+    // Disconnect Discord
     let manager = songbird::get(ctx.serenity_context()).await.unwrap().clone();
+    manager.remove(guild_id).await.unwrap();
     
-    if manager.get(guild_id).is_some() {
-        manager.remove(guild_id).await?;
-        ctx.say("Left the channel.").await?;
-        println!("[INFO] Successfully left the channel.");
-    } else {
-        ctx.say("I'm not in a voice channel.").await?;
-        println!("[INFO] Leave command ignored; not in a channel.");
-    }
-    
+    ctx.say("👋 Left the channel and destroyed the Lavalink player.").await?;
     Ok(())
 }
 
 #[tokio::main]
 async fn main() {
-    println!("[BOOT] Starting up the bot...");
-    let token = env::var("DISCORD_TOKEN").expect("Expected a DISCORD_TOKEN");
-    
+    let token = env::var("DISCORD_TOKEN").expect("Expected DISCORD_TOKEN");
+    let lava_host = env::var("LAVA_HOST").expect("Expected LAVA_HOST");
+    let lava_port: u16 = env::var("LAVA_PORT").unwrap_or_else(|_| "443".to_string()).parse().unwrap();
+    let lava_password = env::var("LAVA_PASSWORD").expect("Expected LAVA_PASSWORD");
+    let lava_secure: bool = env::var("LAVA_SECURE").unwrap_or_else(|_| "true".to_string()).parse().unwrap();
+
     let intents = serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::MESSAGE_CONTENT;
 
     let framework = poise::Framework::builder()
@@ -114,12 +86,25 @@ async fn main() {
             },
             ..Default::default()
         })
-        .setup(|ctx, _ready, framework| {
+        .setup(move |ctx, ready, framework| {
             Box::pin(async move {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                println!("[BOOT] Slash commands registered successfully.");
-                println!("[BOOT] Music bot is completely online and ready!");
-                Ok(Data {})
+                
+                // Initialize the Lavalink Node Connection
+                let node = NodeBuilder::new(&lava_host)
+                    .port(lava_port)
+                    .is_ssl(lava_secure)
+                    .password(&lava_password)
+                    .build();
+
+                let lavalink_client = LavalinkClientBuilder::new(ready.user.id)
+                    .add_node(node)
+                    .build()
+                    .await
+                    .expect("Failed to build Lavalink client");
+
+                println!("✅ Bot connected to Discord & Lavalink Node!");
+                Ok(Data { lavalink: lavalink_client })
             })
         })
         .build();
@@ -131,6 +116,6 @@ async fn main() {
         .expect("Error creating client");
 
     if let Err(why) = client.start().await {
-        println!("[FATAL] Client error: {:?}", why);
+        println!("Client error: {:?}", why);
     }
 }
