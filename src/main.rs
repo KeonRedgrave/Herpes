@@ -41,7 +41,6 @@ async fn play(ctx: Context<'_>, #[description = "Song name or URL"] query: Strin
 
         println!("[STEP 6] Processing Lavalink response...");
         
-        // 0.11.0 Paradigm: TrackLoadData handles extraction safely
         let track = match response.data {
             Some(TrackLoadData::Track(t)) => Some(t),
             Some(TrackLoadData::Search(mut s)) => s.pop(),
@@ -52,7 +51,7 @@ async fn play(ctx: Context<'_>, #[description = "Song name or URL"] query: Strin
         if let Some(t) = track {
             println!("[STEP 7] Track found! Commanding Lavalink to play audio...");
             let player = lava.get_player_context(guild_id.get()).unwrap();
-            player.play(&t).await.unwrap(); // v0.11 requires a reference &t
+            player.play(&t).await.unwrap();
             println!("[STEP 8] Lavalink is now streaming the audio.");
             ctx.say(format!("🎶 Now playing via Lavalink: **{}**", query)).await?;
         } else {
@@ -111,20 +110,21 @@ async fn main() {
                 
                 println!("[BOOT] Connecting to Lavalink node...");
                 
-                // 0.11.0 Paradigm: We MUST use NodeBuilder with specific methods
-                let node = NodeBuilder::new(&lava_host)
-                    .port(lava_port)
-                    .is_ssl(lava_secure)
-                    .password(&lava_password)
-                    .user_id(ready.user.id.get())
-                    .build()
-                    .expect("Failed to build Lavalink Node");
+                // Directly initialize the Node struct
+                let node = lavalink_rs::node::Node {
+                    hostname: lava_host,
+                    port: lava_port,
+                    is_ssl: lava_secure,
+                    password: lava_password,
+                    user_id: lavalink_rs::model::UserId(ready.user.id.get()),
+                    session_id: None,
+                };
 
-                // 0.11.0 Paradigm: LavalinkClient uses builder pattern correctly now
+                // Use the correct `sharded()` load balancing strategy
                 let lavalink_client = LavalinkClient::new(
                     lavalink_rs::model::events::Events::default(),
                     vec![node],
-                    NodeDistributionStrategy::shorthand()
+                    NodeDistributionStrategy::sharded()
                 ).await;
 
                 println!("✅ Bot connected to Discord & Lavalink Node!");
