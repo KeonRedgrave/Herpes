@@ -1,6 +1,8 @@
 use poise::serenity_prelude as serenity;
 use songbird::SerenityInit;
 use lavalink_rs::prelude::*;
+use lavalink_rs::model::events::Events;
+use lavalink_rs::model::track::TrackData;
 use std::env;
 
 struct Data {
@@ -36,16 +38,27 @@ async fn play(ctx: Context<'_>, #[description = "Song name or URL"] query: Strin
         
         println!("[STEP 5] Sending search request to Lavalink node...");
         let lava = &ctx.data().lavalink;
-        
         let response = lava.load_tracks(guild_id.get(), &search_query).await.unwrap();
 
-        println!("[STEP 6] Processing Lavalink response...");
+        println!("[STEP 6] Processing Lavalink JSON response...");
+        // Bulletproof parsing: Convert the Lavalink polymorphic response into a standard JSON Value
+        let data = serde_json::to_value(&response.data).unwrap_or(serde_json::Value::Null);
         
-        let track = match response.data {
-            Some(TrackLoadData::Track(t)) => Some(t),
-            Some(TrackLoadData::Search(mut s)) => s.pop(),
-            Some(TrackLoadData::Playlist(mut p)) => p.tracks.pop(),
-            _ => None,
+        // Safely extract the TrackData regardless of if it's an Array, a Track, or a Playlist Object
+        let track: Option<TrackData> = if data.is_array() {
+            serde_json::from_value(data.as_array().unwrap()[0].clone()).ok()
+        } else if data.is_object() {
+            if let Some(tracks) = data.get("tracks") {
+                if tracks.is_array() && !tracks.as_array().unwrap().is_empty() {
+                    serde_json::from_value(tracks.as_array().unwrap()[0].clone()).ok()
+                } else {
+                    serde_json::from_value(data).ok()
+                }
+            } else {
+                serde_json::from_value(data).ok()
+            }
+        } else {
+            None
         };
 
         if let Some(t) = track {
@@ -110,20 +123,17 @@ async fn main() {
                 
                 println!("[BOOT] Connecting to Lavalink node...");
                 
-                // Directly initialize the Node struct
-                let node = lavalink_rs::node::Node {
-                    hostname: lava_host,
-                    port: lava_port,
-                    is_ssl: lava_secure,
-                    password: lava_password,
-                    user_id: lavalink_rs::model::UserId(ready.user.id.get()),
-                    session_id: None,
-                };
+                // 0.11+ Paradigm: Build the node securely via the Builder pattern
+                let mut node_builder = lavalink_rs::node::NodeBuilder::default();
+                node_builder.hostname(format!("{}:{}", lava_host, lava_port));
+                node_builder.is_ssl(lava_secure);
+                node_builder.password(lava_password);
+                node_builder.user_id(lavalink_rs::model::UserId(ready.user.id.get()));
 
-                // Use the correct `sharded()` load balancing strategy
+                // Initialize the client with the sharded distribution strategy
                 let lavalink_client = LavalinkClient::new(
-                    lavalink_rs::model::events::Events::default(),
-                    vec![node],
+                    Events::default(),
+                    vec![node_builder],
                     NodeDistributionStrategy::sharded()
                 ).await;
 
