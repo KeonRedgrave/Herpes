@@ -1,9 +1,8 @@
 use poise::serenity_prelude as serenity;
-use songbird::SerenityInit; // Fixes the register_songbird error
-use lavalink_rs::prelude::*; // Fixes the missing Lavalink imports
+use songbird::SerenityInit; // Restored to fix the register_songbird error
+use lavalink_rs::prelude::*; // Imports the modern Lavalink tools
 use std::env;
 
-// We store the Lavalink connection in our bot's shared data
 struct Data {
     lavalink: LavalinkClient,
 }
@@ -39,14 +38,25 @@ async fn play(ctx: Context<'_>, #[description = "Song name or URL"] query: Strin
         
         println!("[STEP 5] Sending search request to Lavalink node...");
         let lava = &ctx.data().lavalink;
-        let tracks = lava.load_tracks(guild_id, &search_query).await.unwrap();
+        
+        // Use guild_id.get() to safely pass the u64 to Lavalink
+        let response = lava.load_tracks(guild_id.get(), &search_query).await.unwrap();
 
-        // 3. Tell Lavalink to stream the first result to the channel
         println!("[STEP 6] Processing Lavalink response...");
-        if let Some(track) = tracks.tracks.first() {
+        
+        // Destructure the Lavalink TrackData enum to extract the actual track securely
+        let track = match response.data {
+            Some(TrackData::Track(t)) => Some(t),
+            Some(TrackData::Search(mut s)) => s.pop(),
+            Some(TrackData::Playlist(mut p)) => p.tracks.pop(),
+            _ => None,
+        };
+
+        // 3. Tell Lavalink to stream the extracted result
+        if let Some(t) = track {
             println!("[STEP 7] Track found! Commanding Lavalink to play audio...");
-            let player = lava.get_player_context(guild_id).unwrap();
-            player.play(track).await.unwrap();
+            let player = lava.get_player_context(guild_id.get()).unwrap();
+            player.play(t).await.unwrap();
             println!("[STEP 8] Lavalink is now streaming the audio.");
             ctx.say(format!("🎶 Now playing via Lavalink: **{}**", query)).await?;
         } else {
@@ -67,9 +77,9 @@ async fn leave(ctx: Context<'_>) -> Result<(), Error> {
     println!("[INFO] Command '/leave' received.");
     let guild_id = ctx.guild_id().unwrap();
     
-    // Disconnect Lavalink
+    // Disconnect Lavalink using guild_id.get() and the modern delete_player method
     let lava = &ctx.data().lavalink;
-    let _ = lava.destroy_player(guild_id).await;
+    let _ = lava.delete_player(guild_id.get()).await;
 
     // Disconnect Discord
     let manager = songbird::get(ctx.serenity_context()).await.unwrap().clone();
@@ -105,19 +115,23 @@ async fn main() {
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
                 println!("[BOOT] Slash commands registered successfully.");
                 
-                // Initialize the Lavalink Node Connection
                 println!("[BOOT] Connecting to Lavalink node...");
-                let node = NodeBuilder::new(&lava_host)
-                    .port(lava_port)
-                    .is_ssl(lava_secure)
-                    .password(&lava_password)
-                    .build();
+                
+                // Modern v0.11 NodeBuilder initialization
+                let node = NodeBuilder {
+                    hostname: lava_host,
+                    port: lava_port,
+                    is_ssl: lava_secure,
+                    password: lava_password,
+                    user_id: ready.user.id.get(),
+                    session_id: None,
+                };
 
-                let lavalink_client = LavalinkClientBuilder::new(ready.user.id)
-                    .add_node(node)
-                    .build()
-                    .await
-                    .expect("Failed to build Lavalink client");
+                // Build the client securely with standard instantiation
+                let lavalink_client = LavalinkClient::new(
+                    Events::default(),
+                    vec![node]
+                ).await;
 
                 println!("✅ Bot connected to Discord & Lavalink Node!");
                 Ok(Data { lavalink: lavalink_client })
